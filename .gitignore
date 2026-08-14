@@ -12,9 +12,11 @@ __pycache__/
 *.py[cod]
 *$py.class
 
-# Data files (Very important to not push massive parquet/json files to github)
+# Data files (Very important to not push massive parquet files to github)
 data/
-backend/data/
+backend/data/*
+!backend/data/vector.index
+!backend/data/chunk_mapping.json
 
 # OS generated files
 .DS_Store
