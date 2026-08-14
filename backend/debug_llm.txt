@@ -1,0 +1,5 @@
+Generated Answer: একটি কর্পোরেশন হল একটি কোম্পানি বা একটি গোষ্ঠী যা আইনি দৃষ্টিকোণ থেকে একটি একক প্রতিষ্ঠান হিসাবে কাজ করতে অনুমতি পায় এবং আইন দ্বারা স্বীকৃত হয়।
+
+English Answer: A corporation is a company or a group that is allowed to work as a single unit from a legal perspective and is recognized by law.
+
+Grounded: False

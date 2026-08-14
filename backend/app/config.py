@@ -13,5 +13,6 @@ class Settings(BaseModel):
     FAISS_INDEX_PATH: str = os.path.join(DATA_DIR, "vector.index")
     CHUNK_MAPPING_PATH: str = os.path.join(DATA_DIR, "chunk_mapping.json")
     TOP_K: int = 3
+    RETRIEVAL_THRESHOLD: float = 0.60
 
 settings = Settings()
