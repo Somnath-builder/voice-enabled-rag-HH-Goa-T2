@@ -70,6 +70,7 @@ def run_benchmark():
     # Randomize order
     queries_to_run = list(QUERIES)
     random.shuffle(queries_to_run)
+    queries_to_run = queries_to_run[:10]
     
     successful_requests = 0
     
