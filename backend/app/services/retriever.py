@@ -29,6 +29,9 @@ class RetrieverService:
         start_time = time.time()
         query_vector = embedding_service.embed_query(query)
         
+        # FAISS expects a 2D array, so we reshape the 1D array to (1, D)
+        query_vector = query_vector.reshape(1, -1)
+        
         # FAISS search
         scores, indices = self.index.search(query_vector, top_k)
         
