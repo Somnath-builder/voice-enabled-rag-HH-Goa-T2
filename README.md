@@ -37,7 +37,7 @@ Seamlessly handles queries in English, Hindi, and Bengali. Non-English queries a
 - **Backend:** FastAPI, Python
 - **Vector DB:** FAISS
 - **Embeddings:** `BAAI/bge-small-en-v1.5` (via `fastembed` ONNX runtime for blazing fast local CPU inference)
-- **LLM Engine:** `llama-3.1-8b-instant` via Groq API
+- **LLM Engine:** `openai/gpt-oss-20b` via Groq API
 - **Speech-to-Text:** Sarvam AI STT API
 
 ## 🚀 Quickstart
