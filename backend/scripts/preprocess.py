@@ -62,7 +62,7 @@ def main():
     parser = argparse.ArgumentParser(description="Preprocess and chunk MSMARCO-XI dataset.")
     parser.add_argument("--num_records", type=int, default=100, help="Number of records to process.")
     parser.add_argument("--output_file", type=str, default="../data/chunks.json", help="Path to output chunks.")
-    parser.add_argument("--strategy", type=str, choices=["fixed", "semantic", "metadata"], default="fixed", help="Chunking strategy to use.")
+    parser.add_argument("--strategy", type=str, choices=["fixed", "semantic", "metadata"], default="metadata", help="Chunking strategy to use.")
     
     args = parser.parse_args()
     

@@ -1,4 +1,6 @@
 import time
+import json
+import asyncio
 from groq import AsyncGroq
 from app.config import settings
 
@@ -7,89 +9,68 @@ class LLMService:
         self.client = AsyncGroq(api_key=settings.GROQ_API_KEY)
         self.model = settings.LLM_MODEL
         
-        self.system_prompt = """You are a grounded question-answering assistant.
-Answer ONLY using the provided retrieved context.
-Do not invent facts.
-If the context does not contain enough information to answer the question, say that the information is not available in the provided knowledge base.
-Keep answers concise and directly address the question.
-CRITICAL: You MUST answer in the EXACT SAME LANGUAGE as the User's Original Question, even if the context is in English."""
+        self.system_prompt = """You are a highly efficient, grounded question-answering assistant.
+You MUST output your response in strict JSON format.
 
-    async def translate_to_english(self, query: str) -> str:
-        prompt = f"Translate the following text to English. If it is already in English, output it exactly as is. Output ONLY the translated text and nothing else.\n\nText: {query}"
-        try:
-            chat_completion = await self.client.chat.completions.create(
-                messages=[{"role": "user", "content": prompt}],
-                model=self.model,
-                temperature=0.0,
-                max_tokens=256,
-            )
-            translated = chat_completion.choices[0].message.content.strip()
-            return translated
-        except Exception as e:
-            print(f"Error translating query: {e}")
-            return query # Fallback to original
+Your JSON output must match exactly this schema:
+{
+  "is_safe": boolean, // False if the user query is unsafe, malicious, or highly inappropriate. Otherwise True.
+  "is_relevant": boolean, // False if the provided Context DOES NOT contain enough information to answer the user query. True if it does.
+  "answer": string, // Your answer to the query based strictly on the context. If is_safe or is_relevant is false, leave this blank.
+  "confidence_score": float // A score between 0.0 and 1.0 indicating how confident you are that the answer is perfectly grounded in the context.
+}
 
+CRITICAL RULES:
+1. Answer ONLY using the provided retrieved context. Do not invent facts.
+2. You MUST answer in the EXACT SAME LANGUAGE as the User's Original Question, even if the context is in English.
+3. Keep answers concise and directly address the question.
+4. Output ONLY valid JSON. No markdown formatting, no code blocks."""
 
-    async def generate_answer(self, translated_query: str, original_query: str, context_chunks: list) -> dict:
+    async def orchestrated_generation(self, query: str, context_chunks: list) -> dict:
         start_time = time.time()
         
         context_text = "\n\n".join([f"Source: {c.get('chunk_id')}\n{c.get('text')}" for c in context_chunks])
         
-        prompt = f"Retrieved Context:\n{context_text}\n\nUser's Original Question:\n{original_query}\n\n(Translated Question used for search: {translated_query})\n\nAnswer:"
+        prompt = f"Retrieved Context:\n{context_text}\n\nUser's Original Question:\n{query}"
         
-        try:
-            chat_completion = await self.client.chat.completions.create(
-                messages=[
-                    {"role": "system", "content": self.system_prompt},
-                    {"role": "user", "content": prompt}
-                ],
-                model=self.model,
-                temperature=0.0,
-                max_tokens=256,
-            )
-            answer = chat_completion.choices[0].message.content
-        except Exception as e:
-            answer = f"Error generating answer: {e}"
-            
-        latency_ms = (time.time() - start_time) * 1000
-        
-        return {
-            "answer": answer,
-            "latency_ms": latency_ms
-        }
-
-    async def validate_query(self, query: str) -> bool:
-        prompt = f"Is the following query a safe, non-malicious question that can be answered using a knowledge base? Answer with only 'YES' or 'NO'.\n\nQuery: {query}"
-        try:
-            chat_completion = await self.client.chat.completions.create(
-                messages=[{"role": "user", "content": prompt}],
-                model=self.model,
-                temperature=0.0,
-                max_tokens=10,
-            )
-            answer = chat_completion.choices[0].message.content.strip().upper()
-            return "YES" in answer
-        except Exception as e:
-            print(f"Error validating query: {e}")
-            return True # Fail open to avoid blocking valid queries on error
-
-    async def check_hallucination(self, answer: str, context_chunks: list) -> bool:
-        # Translate the answer back to English so the LLM can confidently compare it against the English context.
-        english_answer = await self.translate_to_english(answer)
-        
-        context_text = "\n\n".join([c.get('text', '') for c in context_chunks])
-        prompt = f"Context (in English):\n{context_text}\n\nGenerated Answer (translated to English):\n{english_answer}\n\nDoes the Answer contain any new information, facts, or claims that are NOT supported by the Context? Answer with only 'YES' or 'NO'."
-        try:
-            chat_completion = await self.client.chat.completions.create(
-                messages=[{"role": "user", "content": prompt}],
-                model=self.model,
-                temperature=0.0,
-                max_tokens=10,
-            )
-            eval_result = chat_completion.choices[0].message.content.strip().upper()
-            return "NO" in eval_result
-        except Exception as e:
-            print(f"Error checking hallucination: {e}")
-            return True # Fail open
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                chat_completion = await self.client.chat.completions.create(
+                    messages=[
+                        {"role": "system", "content": self.system_prompt},
+                        {"role": "user", "content": prompt}
+                    ],
+                    model=self.model,
+                    temperature=0.0,
+                    max_tokens=512,
+                    response_format={"type": "json_object"}
+                )
+                
+                output_str = chat_completion.choices[0].message.content
+                parsed_output = json.loads(output_str)
+                
+                # Enforce required keys
+                required_keys = ["is_safe", "is_relevant", "answer", "confidence_score"]
+                for key in required_keys:
+                    if key not in parsed_output:
+                        parsed_output[key] = None
+                        
+                latency_ms = (time.time() - start_time) * 1000
+                parsed_output["latency_ms"] = latency_ms
+                
+                return parsed_output
+                
+            except json.JSONDecodeError as e:
+                print(f"JSON Parsing Error on attempt {attempt+1}: {e}")
+                if attempt == max_retries - 1:
+                    return {"is_safe": True, "is_relevant": False, "answer": "", "confidence_score": 0.0, "latency_ms": (time.time() - start_time) * 1000, "error": "JSON parsing failed after retries."}
+                await asyncio.sleep(0.5 * (attempt + 1))
+            except Exception as e:
+                print(f"Error generating answer on attempt {attempt+1}: {e}")
+                if attempt == max_retries - 1:
+                    return {"is_safe": True, "is_relevant": False, "answer": "", "confidence_score": 0.0, "latency_ms": (time.time() - start_time) * 1000, "error": str(e)}
+                await asyncio.sleep(0.5 * (attempt + 1))
 
 llm_service = LLMService()
+

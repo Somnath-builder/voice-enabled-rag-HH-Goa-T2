@@ -7,28 +7,13 @@ from app.services.retriever import retriever_service
 class OrchestratorService:
     async def process_query(self, query: str) -> Dict[str, Any]:
         start_time = time.time()
-        
-        # 0. Translate Query (Multilingual Support for single-language embeddings)
-        translated_query = await llm_service.translate_to_english(query)
-        
-        # 1. Validate Input (Guardrail)
-        is_valid = await llm_service.validate_query(translated_query)
-        if not is_valid:
-            return {
-                "answer": "I'm sorry, I can only answer questions related to the provided knowledge base.",
-                "grounded": False,
-                "sources": [],
-                "retrieval_latency_ms": 0.0,
-                "generation_latency_ms": 0.0,
-                "total_latency_ms": (time.time() - start_time) * 1000
-            }
             
-        # 2. Retrieve
-        retrieval_res = retriever_service.retrieve(translated_query)
+        # 1. Retrieve (FastEmbed directly supports multilingual queries, so we skip explicit LLM translation)
+        retrieval_res = retriever_service.retrieve(query)
         chunks = retrieval_res["chunks"]
         retrieval_latency = retrieval_res["latency_ms"]
         
-        # 3. Retrieval Threshold Validation (Guardrail)
+        # Filter by threshold
         valid_chunks = [c for c in chunks if c.get("score", 0) >= settings.RETRIEVAL_THRESHOLD]
         
         if not valid_chunks:
@@ -41,17 +26,25 @@ class OrchestratorService:
                 "total_latency_ms": (time.time() - start_time) * 1000
             }
             
-        # 4. Generate Answer
-        gen_res = await llm_service.generate_answer(translated_query, query, valid_chunks)
-        answer = gen_res["answer"]
-        generation_latency = gen_res["latency_ms"]
+        # 2. Orchestrated Generation (JSON Structured Output with Harness)
+        # This single call handles Guardrails (Safety), Hallucination (Relevance), and Answer Generation
+        gen_res = await llm_service.orchestrated_generation(query, valid_chunks)
+        generation_latency = gen_res.get("latency_ms", 0.0)
         
-        # 5. Hallucination Check (Guardrail)
-        is_grounded = await llm_service.check_hallucination(answer, valid_chunks)
+        is_safe = gen_res.get("is_safe", True)
+        is_relevant = gen_res.get("is_relevant", True)
+        answer = gen_res.get("answer", "")
+        confidence = gen_res.get("confidence_score", 0.0)
         
-        if not is_grounded:
+        if not is_safe:
+            answer = "I'm sorry, I cannot fulfill this request as it violates safety policies."
+            is_grounded = False
+        elif not is_relevant or confidence < 0.5:
             answer = "I found some information, but I couldn't confidently formulate an answer strictly based on the retrieved context."
-        
+            is_grounded = False
+        else:
+            is_grounded = True
+            
         total_latency = (time.time() - start_time) * 1000
         
         return {
